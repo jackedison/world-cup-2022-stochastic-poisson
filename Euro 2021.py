@@ -10,6 +10,15 @@ import pandas as pd
 import itertools
 
 
+# Global declaration of groups
+groups = {'A': ['Italy', 'Switzerland', 'Turkey', 'Wales'],
+          'B': ['Belgium', 'Denmark', 'Finland', 'Russia'],
+          'C': ['Austria', 'Netherlands', 'North Macedonia', 'Ukraine'],
+          'D': ['Croatia', 'Czech Republic', 'England', 'Scotland'],
+          'E': ['Poland', 'Slovakia', 'Spain', 'Sweden'],
+          'F': ['France', 'Germany', 'Hungary', 'Portugal']}
+
+
 def scrape_odds_from_web(get_new_data=True):
     '''Scrape the latest odds from oddschecker.com for winner of Euro 2020
     Return dataframe of probability of winning the tournament the bookies are offering'''
@@ -107,13 +116,6 @@ def gen_result(p1, p2, u=2.88):
 def get_df_group_matches():
     '''Return df of groups for Euro 2020'''
 
-    groups = {'A': ['Italy', 'Switzerland', 'Turkey', 'Wales'],
-              'B': ['Belgium', 'Denmark', 'Finland', 'Russia'],
-              'C': ['Austria', 'Netherlands', 'North Macedonia', 'Ukraine'],
-              'D': ['Croatia', 'Czech Republic', 'England', 'Scotland'],
-              'E': ['Poland', 'Slovakia', 'Spain', 'Sweden'],
-              'F': ['France', 'Germany', 'Hungary', 'Portugal']}
-
     cols = ['Team1', 'Team2', 'Team1_Goals', 'Team2_Goals']
     df_group_matches = pd.DataFrame(columns=cols)
 
@@ -122,28 +124,13 @@ def get_df_group_matches():
         for c in combos:
             *results, winner = gen_result(m(c[0]), m(c[1]))
             df_group_matches = df_group_matches.append(dict(zip(cols, [c[0], c[1]] + list(results))),
-                                                    ignore_index=True)
+                                                       ignore_index=True)
 
     return df_group_matches
 
 
-if __name__ == '__main__':
-    # Get probability of each team winning Euro according to bookies
-    df_prob = scrape_odds_from_web(get_new_data=False)
-
-    # Get group matches NOTE: Includes results, do we want to split out?
-    df_group_matches = get_df_group_matches()
-
-
-
-
-    print(df_group_matches)
-
-
-# In[265]:
-
-
 def standings_from_results(matches):
+    '''Take results of group matches and return df of group standings'''
     # Generate group standings from results
     df_group = pd.DataFrame(groups.items(), columns=[
                             'Group', 'Country']).explode(column='Country')
@@ -189,178 +176,196 @@ def standings_from_results(matches):
     return df_group
 
 
-df_group = standings_from_results(matches=df_group_matches)
-df_group
+def get_group_rankings(df_group):
+    '''Determine group rankings from the results'''
+    df_group_results = df_group.copy()
+    df_group_results['Rank'] = df_group_results.groupby(
+        'Group')['Pts'].rank(method='min', ascending=False)
+
+    # To determine ties, most points in head to head (e.g. if 3 not just w/l) goal difference, goals scored
+    # For each group if rank tie then check just those matches
+    for group in df_group_results['Group'].unique():
+        df_slice_1 = df_group_results.loc[df_group_results['Group'] == group]
+        for rank in df_slice_1['Rank'].unique():
+            df_slice_2 = df_slice_1.loc[df_slice_1['Rank'] == rank]
+            if len(df_slice_2) > 1:  # Then we have some ties to determine
+                # First keep only matches between these teams and rank again
+                countries = df_slice_2.index
+                filter1 = df_group_matches['Team1'].isin(countries)
+                filter2 = df_group_matches['Team2'].isin(countries)
+                matches = df_group_matches.loc[filter1 & filter2]
+
+                # Then generate results from just those matches
+                standings = standings_from_results(matches)
+
+                # Join pts, gd, gf back to slice for ranking 2
+                standings = standings[['Pts', 'GD', 'GF']]
+                standings.columns = ['Pts2', 'GD2', 'GF2']
+                if 'Pts2' in df_group_results.columns:
+                    df_group_results.update(standings)
+                else:
+                    df_group_results = df_group_results.merge(
+                        standings, on='Country', how='left')
+
+                # Now Rank2 by: Rank >Pts2 > GD2 > GF2 > GD > GF > W
+                # https://www.mirror.co.uk/sport/football/news/euro-2020-group-stages-points-24250173
+                rank_order = ['Rank', 'Pts2', 'GD2', 'GF2', 'GD', 'GF', 'W']
+                rank_asc_desc = [True, False, False,
+                                 False, False, False, False]
+                df_group_results = df_group_results.sort_values(
+                    rank_order, ascending=rank_asc_desc)
+                df_group_results['TempRank'] = [
+                    i for i in range(len(df_group_results))]
+                df_group_results['Rank2'] = df_group_results.groupby('Group')[
+                    'TempRank'].rank()
+
+    # Re-order
+    df_group_results = df_group_results.sort_values(['Group', 'Rank2'])
+
+    # Drop cols
+    if 'TempRank' in df_group_results.columns:
+        df_group_results = df_group_results.drop(columns=['TempRank'])
+
+    return df_group_results
 
 
-# In[266]:
+def get_third_place_rankings(df_group_results):
+    '''Four 3rd place teams to go through. Ranked by Pts > GD > GF
+    https://www.thesun.co.uk/sport/football/15062810/euro-2020-third-place-group-qualify-knockout-stages/'''
+
+    df_3rd = df_group_results.loc[df_group_results['Rank2'] == 3].copy()
+
+    rank_order = ['Pts', 'GD', 'GF']
+
+    df_3rd['Rank3'] = df_3rd[rank_order].apply(
+        tuple, axis=1).rank(ascending=False)
+
+    return df_3rd
 
 
-# Determine group results (complex...)
-df_group_results = df_group.copy()
-df_group_results['Rank'] = df_group_results.groupby(
-    'Group')['Pts'].rank(method='min', ascending=False)
+def get_knockout_pairing(df_group_results, df_3rd):
+    '''Knockout round pairing (ro16) from group results
+    https://en.wikipedia.org/wiki/UEFA_Euro_2020_knockout_phase#Combinations_of_matches_in_the_round_of_16'''
 
-# To determine ties, most points in head to head (e.g. if 3 not just w/l) goal difference, goals scored
-# For each group if rank tie then check just those matches
-for group in df_group_results['Group'].unique():
-    df_slice_1 = df_group_results.loc[df_group_results['Group'] == group]
-    for rank in df_slice_1['Rank'].unique():
-        df_slice_2 = df_slice_1.loc[df_slice_1['Rank'] == rank]
-        if len(df_slice_2) > 1:  # Then we have some ties to determine
-            # First keep only matches between these teams and rank again
-            countries = df_slice_2.index
-            filter1 = df_group_matches['Team1'].isin(countries)
-            filter2 = df_group_matches['Team2'].isin(countries)
-            matches = df_group_matches.loc[filter1 & filter2]
+    # 3rd place matching. 1B, 1C, 1E, 1F vs the qualifiers of:
+    # Create generator for match order
+    first_v_third = [
+        ['A', 'D', 'B', 'C'],
+        ['A', 'E', 'B', 'C'],
+        ['A', 'F', 'B', 'C'],
+        ['D', 'E', 'A', 'B'],
+        ['D', 'F', 'A', 'B'],
+        ['E', 'F', 'B', 'A'],
+        ['E', 'D', 'C', 'A'],
+        ['F', 'D', 'C', 'A'],
+        ['E', 'F', 'C', 'A'],
+        ['E', 'F', 'D', 'A'],
+        ['E', 'D', 'B', 'C'],
+        ['F', 'D', 'C', 'B'],
+        ['F', 'E', 'C', 'B'],
+        ['F', 'E', 'D', 'B'],
+        ['F', 'E', 'D', 'C']
+    ]
 
-            # Then generate results from just those matches
-            standings = standings_from_results(matches)
+    qual_3rd = df_3rd.loc[df_3rd['Rank3'] <= 4]['Group'].tolist()
+    third_pairing = [lst for lst in first_v_third if sorted(
+        lst) == sorted(qual_3rd)][0]
 
-            # Join pts, gd, gf back to slice for ranking 2
-            standings = standings[['Pts', 'GD', 'GF']]
-            standings.columns = ['Pts2', 'GD2', 'GF2']
-            if 'Pts2' in df_group_results.columns:
-                df_group_results.update(standings)
-            else:
-                df_group_results = df_group_results.merge(
-                    standings, on='Country', how='left')
+    def gen_third_place():
+        yield third_pairing[0]
+        yield third_pairing[3]
+        yield third_pairing[2]
+        yield third_pairing[1]
 
-            # Now Rank2 by: Rank >Pts2 > GD2 > GF2 > GD > GF > W
-            # https://www.mirror.co.uk/sport/football/news/euro-2020-group-stages-points-24250173
-            rank_order = ['Rank', 'Pts2', 'GD2', 'GF2', 'GD', 'GF', 'W']
-            rank_asc_desc = [True, False, False, False, False, False, False]
-            df_group_results = df_group_results.sort_values(
-                rank_order, ascending=rank_asc_desc)
-            df_group_results['TempRank'] = [
-                i for i in range(len(df_group_results))]
-            df_group_results['Rank2'] = df_group_results.groupby('Group')[
-                'TempRank'].rank()
+    third_place = gen_third_place()
 
-# Re-order
-df_group_results = df_group_results.sort_values(['Group', 'Rank2'])
+    # And a standard method to fetch the team from the df using our notation
+    def get_team(group_rank):
+        '''Method to fetch results for knockout phase pairing'''
+        if group_rank == '3':
+            return df_3rd[df_3rd['Group'] == next(third_place)].index[0]
+        else:
+            group, rank = list(group_rank)
+            return df_group_results[(df_group_results['Group'] == group) & (df_group_results['Rank2'] == int(rank))].index[0]
 
-# Drop cols
-if 'TempRank' in df_group_results.columns:
-    df_group_results = df_group_results.drop(columns=['TempRank'])
+    # Define knockout round grouping starting with round of 16
+    round_16_pairs = [
+        ['B1', '3'],
+        ['A1', 'C2'],
+        ['F1', '3'],
+        ['D2', 'E2'],
+        ['E1', '3'],
+        ['D1', 'F2'],
+        ['C1', '3'],
+        ['A2', 'B2']
+    ]
 
-df_group_results
+    df_ko = pd.DataFrame(round_16_pairs, columns=['Team1', 'Team2'])
+    df_ko['Team1'] = df_ko['Team1'].apply(get_team)
+    df_ko['Team2'] = df_ko['Team2'].apply(get_team)
 
-
-# In[274]:
-
-
-# 4 3rd place teams to go through. Ranked by Pts > GD > GF
-# https://www.thesun.co.uk/sport/football/15062810/euro-2020-third-place-group-qualify-knockout-stages/
-df_3rd = df_group_results.loc[df_group_results['Rank2'] == 3].copy()
-
-rank_order = ['Pts', 'GD', 'GF']
-
-df_3rd['Rank3'] = df_3rd[rank_order].apply(tuple, axis=1).rank(ascending=False)
-
-
-df_3rd
+    return df_ko
 
 
-# In[377]:
+def gen_knockout_results(df_ko):
+    '''Pass in knockout df, generate match results and return next round'''
+    # R16, find winners, r8 -> r4 -> r2 -> winner
+
+    # Generator
+    while True:
+        # Predict winner
+        df_ko[['Team1_Goals', 'Team2_Goals', 'Winner']] = df_ko[['Team1', 'Team2']].apply(
+            lambda x: gen_result(m(x[0]), m(x[1])),
+            axis=1, result_type='expand')
+
+        # Yield results
+        yield df_ko
+
+        # Now reduce down to next matches
+        df_ko = pd.DataFrame(
+            [[df_ko.loc[i, f"Team{df_ko.loc[i, 'Winner']}"],
+              df_ko.loc[i+1, f"Team{df_ko.loc[i+1, 'Winner']}"]]
+             for i in range(0, len(df_ko), 2)],
+            columns=['Team1', 'Team2']
+        )
 
 
-# And then how they match up to knockout phase
-# https://en.wikipedia.org/wiki/UEFA_Euro_2020_knockout_phase#Combinations_of_matches_in_the_round_of_16
+if __name__ == '__main__':
+    # Get probability of each team winning Euro according to bookies
+    df_prob = scrape_odds_from_web(get_new_data=False)
 
-# 3rd place matching. 1B, 1C, 1E, 1F vs the qualifiers of:
-# Create generator for match order
-first_v_third = [
-    ['A', 'D', 'B', 'C'],
-    ['A', 'E', 'B', 'C'],
-    ['A', 'F', 'B', 'C'],
-    ['D', 'E', 'A', 'B'],
-    ['D', 'F', 'A', 'B'],
-    ['E', 'F', 'B', 'A'],
-    ['E', 'D', 'C', 'A'],
-    ['F', 'D', 'C', 'A'],
-    ['E', 'F', 'C', 'A'],
-    ['E', 'F', 'D', 'A'],
-    ['E', 'D', 'B', 'C'],
-    ['F', 'D', 'C', 'B'],
-    ['F', 'E', 'C', 'B'],
-    ['F', 'E', 'D', 'B'],
-    ['F', 'E', 'D', 'C']
-]
+    # Get group matches NOTE: Includes results, do we want to split out?
+    df_group_matches = get_df_group_matches()
 
-qual_3rd = df_3rd.loc[df_3rd['Rank3'] <= 4]['Group'].tolist()
-third_pairing = [lst for lst in first_v_third if sorted(
-    lst) == sorted(qual_3rd)][0]
+    # Generate group results from the matches
+    df_group = standings_from_results(matches=df_group_matches)
 
+    # Determine rankings of groups from the results (complex)
+    df_group_results = get_group_rankings(df_group)
 
-def gen_third_place():
-    yield third_pairing[0]
-    yield third_pairing[3]
-    yield third_pairing[2]
-    yield third_pairing[1]
+    # Determine the top four 3rd place teams
+    df_3rd = get_third_place_rankings(df_group_results)
 
+    # Get the knockout round (ro16) match pairs
+    df_ro16 = get_knockout_pairing(df_group_results, df_3rd)
 
-third_place = gen_third_place()
+    # Get ro16 - generator for knockout rounds
+    knockout_results = gen_knockout_results(df_ro16)
+    df_ro16_results = next(knockout_results)
+    print(df_ro16_results)
 
+    # Get quarters
+    df_qf_results = next(knockout_results)
+    print(df_qf_results)
 
-def get_team(group_rank):
-    '''Method to fetch results for knockout phase pairing'''
-    if group_rank == '3':
-        return df_3rd[df_3rd['Group'] == next(third_place)].index[0]
-    else:
-        group, rank = list(group_rank)
-        return df_group_results[(df_group_results['Group'] == group) & (df_group_results['Rank2'] == int(rank))].index[0]
+    # Get semis
+    df_sf_results = next(knockout_results)
+    print(df_sf_results)
 
+    # Get finals
+    df_f_results = next(knockout_results)
+    print(df_f_results)
 
-# Define knockout round grouping starting with round of 16
-round_16_pairs = [
-    ['B1', '3'],
-    ['A1', 'C2'],
-    ['F1', '3'],
-    ['D2', 'E2'],
-    ['E1', '3'],
-    ['D1', 'F2'],
-    ['C1', '3'],
-    ['A2', 'B2']
-]
-
-df_ko = pd.DataFrame(round_16_pairs, columns=['Team1', 'Team2'])
-df_ko['Team1'] = df_ko['Team1'].apply(get_team)
-df_ko['Team2'] = df_ko['Team2'].apply(get_team)
-
-df_ko
-
-
-# In[378]:
-
-
-# Now loop through r16, find winners, r8 -> r4 -> r2 -> winner
-
-while True:
-    # Predict winner
-    df_ko[['Team1_Goals', 'Team2_Goals', 'Winner']] = df_ko[['Team1', 'Team2']]                                                        .apply(lambda x: gen_result(m(x[0]), m(x[1])),
-                                                                                                                                              axis=1, result_type='expand')
-
-    # Save results and exit if winner found
-    print(df_ko, end='\n\n')
-    if len(df_ko) == 1:
-        break
-
-    # Now reduce down to next matches
-    df_ko = pd.DataFrame(
-        [[df_ko.loc[i, f"Team{df_ko.loc[i, 'Winner']}"],
-          df_ko.loc[i+1, f"Team{df_ko.loc[i+1, 'Winner']}"]]
-         for i in range(0, len(df_ko), 2)],
-        columns=['Team1', 'Team2']
-    )
-winner = df_ko.loc[0, f"Team{df_ko.loc[0, 'Winner']}"]
-print(f'Winner is {winner}')
-
-
-# In[ ]:
-
-
-# In[ ]:
-
-
-# In[ ]:
+    # Print winner
+    winner = df_f_results.loc[0, f"Team{df_f_results.loc[0, 'Winner']}"]
+    print(f'Winner is {winner}')
