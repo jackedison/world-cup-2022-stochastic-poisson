@@ -19,7 +19,7 @@ groups = {'A': ['Italy', 'Switzerland', 'Turkey', 'Wales'],
           'F': ['France', 'Germany', 'Hungary', 'Portugal']}
 
 
-def scrape_odds_from_web(get_new_data=True):
+def scrape_odds_from_web(get_new_data):
     '''Scrape the latest odds from oddschecker.com for winner of Euro 2020
     Return dataframe of probability of winning the tournament the bookies are offering'''
 
@@ -330,11 +330,24 @@ def gen_knockout_results(df_ko):
         )
 
 
+def save_results_to_excel(*dfs):
+    '''Take in all the dfs and save to Excel'''
+
+    sheet_names = ['P(Win)', 'Group Matches', 'Group Standings', 'Group Results', '3rd Place Results', 'Ro16', 'QF', 'SF', 'F']
+
+    writer = pd.ExcelWriter('euro_2021_poisson_forecast.xlsx', engine='xlsxwriter')
+
+    for df, sheet_name in zip(dfs, sheet_names):
+        df.to_excel(writer, sheet_name=sheet_name)
+
+    writer.save()
+
+
 if __name__ == '__main__':
     # Get probability of each team winning Euro according to bookies
     df_prob = scrape_odds_from_web(get_new_data=False)
 
-    # Get group matches NOTE: Includes results, do we want to split out?
+    # Get group matches
     df_group_matches = get_df_group_matches()
 
     # Generate group results from the matches
@@ -352,20 +365,20 @@ if __name__ == '__main__':
     # Get ro16 - generator for knockout rounds
     knockout_results = gen_knockout_results(df_ro16)
     df_ro16_results = next(knockout_results)
-    print(df_ro16_results)
 
     # Get quarters
     df_qf_results = next(knockout_results)
-    print(df_qf_results)
 
     # Get semis
     df_sf_results = next(knockout_results)
-    print(df_sf_results)
 
     # Get finals
     df_f_results = next(knockout_results)
-    print(df_f_results)
 
     # Print winner
     winner = df_f_results.loc[0, f"Team{df_f_results.loc[0, 'Winner']}"]
     print(f'Winner is {winner}')
+
+    # Save all to Excel
+    save_results_to_excel(df_prob, df_group_matches, df_group, df_group_results,
+                          df_3rd, df_ro16_results, df_qf_results, df_sf_results, df_f_results)
