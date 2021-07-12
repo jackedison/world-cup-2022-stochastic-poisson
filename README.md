@@ -1,3 +1,7 @@
+**2021-07-11 update: my algorithm won the competition with 75 points! I have extended the code to simulate average score and would have won ~34.3% of the time over 11,000 trials.**
+
+**Tweaking root phi weighting and u of poisson distribution is a straightforward means to optimise (or overfit) for the future. Goal forecasts are too tail heavy.**
+
 <h1>Euro 2020 Stochastic Poisson Distribution Results Generator (+ Oddschecker web scraping)</h1>
 
 As a friendly competition we predict Euro and World Cup results on a biennial basis.
@@ -5,6 +9,7 @@ As a friendly competition we predict Euro and World Cup results on a biennial ba
 I haven't been following football much since working at my fund so decided to build a simple model to generate my results in Python.
 
 Disclaimer: this was built in a few hours as a bit of fun and used no historic competition data, no attacking/defending data, no ML model training, etc. See notes below for the arbitrary assumptions I chose to incorporate.
+
 
 <h3>Notes</h3>
 
