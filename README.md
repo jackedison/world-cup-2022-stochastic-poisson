@@ -1,3 +1,5 @@
+**2022-11-18 update: cloned and re-ran for 2022 World Cup. No changes**
+
 **2021-07-11 update: my algorithm won the competition with 75 points! I have extended the code to simulate average score and would have won ~34.3% of the time over 11,000 trials.**
 
 **Tweaking root phi weighting and u of poisson distribution is a straightforward means to optimise (or overfit) for the future. Goal forecasts are too tail heavy.**

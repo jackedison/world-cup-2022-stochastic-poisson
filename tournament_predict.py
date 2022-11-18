@@ -8,28 +8,35 @@ import sys
 import numpy as np
 import pandas as pd
 import itertools
+import json
 
+#tournament = "euro_2021"
+tournament = "world_cup_2022"
+
+# Oddschecker
+oddschecker = {
+    "euro_2021": ["oddschecker_euro_2020_odds.html", "https://www.oddschecker.com/football/world-cup/winner"],
+    "world_cup_2022": ["oddschecker_world_cup_2022_odds.html", "https://www.oddschecker.com/football/world-cup/winner"],
+} 
 
 # Global declaration of groups
-groups = {'A': ['Italy', 'Switzerland', 'Turkey', 'Wales'],
-          'B': ['Belgium', 'Denmark', 'Finland', 'Russia'],
-          'C': ['Austria', 'Netherlands', 'North Macedonia', 'Ukraine'],
-          'D': ['Croatia', 'Czech Republic', 'England', 'Scotland'],
-          'E': ['Poland', 'Slovakia', 'Spain', 'Sweden'],
-          'F': ['France', 'Germany', 'Hungary', 'Portugal']}
+with open("groups.json") as f:
+    groups = json.load(f)
+    groups = groups[tournament]
 
 
 def scrape_odds_from_web(get_new_data):
     '''Scrape the latest odds from oddschecker.com for winner of Euro 2020
-    Return dataframe of probability of winning the tournament the bookies are offering'''
+    Return dataframe of probability of winning the tournament the bookies are offering
+    NOTE: For world cup fails without cookies so just manually downloaded...'''
 
-    html_local_name = 'oddschecker_euro_2020_odds.html'
+    html_local_name, url = oddschecker[tournament]
     if get_new_data:
-        url = 'https://www.oddschecker.com/football/euro-2020/winner'
-
         # Need a header from browser to not be blocked from scraping
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.77 Safari/537.36'}
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.4951.64 Safari/537.36',
+            'Referer': 'https://www.google.com/'
+            }
 
         r = requests.get(url, headers=headers)
         html = r.content
@@ -220,7 +227,8 @@ def get_group_rankings(df_group):
                     'TempRank'].rank()
 
     # Re-order
-    df_group_results = df_group_results.sort_values(['Group', 'Rank2'])
+    sort_cols = ['Group', 'Rank2'] if 'Rank2' in df_group_results.columns else ['Group']
+    df_group_results = df_group_results.sort_values(sort_cols)
 
     # Drop cols
     if 'TempRank' in df_group_results.columns:
@@ -243,41 +251,42 @@ def get_third_place_rankings(df_group_results):
     return df_3rd
 
 
-def get_knockout_pairing(df_group_results, df_3rd):
+def get_knockout_pairing(df_group_results, df_3rd=None):
     '''Knockout round pairing (ro16) from group results
     https://en.wikipedia.org/wiki/UEFA_Euro_2020_knockout_phase#Combinations_of_matches_in_the_round_of_16'''
 
     # 3rd place matching. 1B, 1C, 1E, 1F vs the qualifiers of:
     # Create generator for match order
-    first_v_third = [
-        ['A', 'D', 'B', 'C'],
-        ['A', 'E', 'B', 'C'],
-        ['A', 'F', 'B', 'C'],
-        ['D', 'E', 'A', 'B'],
-        ['D', 'F', 'A', 'B'],
-        ['E', 'F', 'B', 'A'],
-        ['E', 'D', 'C', 'A'],
-        ['F', 'D', 'C', 'A'],
-        ['E', 'F', 'C', 'A'],
-        ['E', 'F', 'D', 'A'],
-        ['E', 'D', 'B', 'C'],
-        ['F', 'D', 'C', 'B'],
-        ['F', 'E', 'C', 'B'],
-        ['F', 'E', 'D', 'B'],
-        ['F', 'E', 'D', 'C']
-    ]
+    if df_3rd is not None:
+        first_v_third = [
+            ['A', 'D', 'B', 'C'],
+            ['A', 'E', 'B', 'C'],
+            ['A', 'F', 'B', 'C'],
+            ['D', 'E', 'A', 'B'],
+            ['D', 'F', 'A', 'B'],
+            ['E', 'F', 'B', 'A'],
+            ['E', 'D', 'C', 'A'],
+            ['F', 'D', 'C', 'A'],
+            ['E', 'F', 'C', 'A'],
+            ['E', 'F', 'D', 'A'],
+            ['E', 'D', 'B', 'C'],
+            ['F', 'D', 'C', 'B'],
+            ['F', 'E', 'C', 'B'],
+            ['F', 'E', 'D', 'B'],
+            ['F', 'E', 'D', 'C']
+        ]
 
-    qual_3rd = df_3rd.loc[df_3rd['Rank3'] <= 4]['Group'].tolist()
-    third_pairing = [lst for lst in first_v_third if sorted(
-        lst) == sorted(qual_3rd)][0]
+        qual_3rd = df_3rd.loc[df_3rd['Rank3'] <= 4]['Group'].tolist()
+        third_pairing = [lst for lst in first_v_third if sorted(
+            lst) == sorted(qual_3rd)][0]
 
-    def gen_third_place():
-        yield third_pairing[0]
-        yield third_pairing[3]
-        yield third_pairing[2]
-        yield third_pairing[1]
+        def gen_third_place():
+            yield third_pairing[0]
+            yield third_pairing[3]
+            yield third_pairing[2]
+            yield third_pairing[1]
 
-    third_place = gen_third_place()
+        third_place = gen_third_place()
 
     # And a standard method to fetch the team from the df using our notation
     def get_team(group_rank):
@@ -289,16 +298,28 @@ def get_knockout_pairing(df_group_results, df_3rd):
             return df_group_results[(df_group_results['Group'] == group) & (df_group_results['Rank2'] == int(rank))].index[0]
 
     # Define knockout round grouping starting with round of 16
-    round_16_pairs = [
-        ['B1', '3'],
-        ['A1', 'C2'],
-        ['F1', '3'],
-        ['D2', 'E2'],
-        ['E1', '3'],
-        ['D1', 'F2'],
-        ['C1', '3'],
-        ['A2', 'B2']
-    ]
+    if tournament.startswith("euro"):
+        round_16_pairs = [
+            ['B1', '3'],
+            ['A1', 'C2'],
+            ['F1', '3'],
+            ['D2', 'E2'],
+            ['E1', '3'],
+            ['D1', 'F2'],
+            ['C1', '3'],
+            ['A2', 'B2']
+        ]
+    else:
+        round_16_pairs = [
+            ['A1', 'B2'],
+            ['C1', 'D2'],
+            ['E1', 'F2'],
+            ['G1', 'H2'],
+            ['B1', 'A2'],
+            ['D1', 'C2'],
+            ['F1', 'E2'],
+            ['H1', 'G2']
+        ]
 
     df_ko = pd.DataFrame(round_16_pairs, columns=['Team1', 'Team2'])
     df_ko['Team1'] = df_ko['Team1'].apply(get_team)
@@ -335,10 +356,12 @@ def save_results_to_excel(*dfs):
 
     sheet_names = ['P(Win)', 'Group Matches', 'Group Standings', 'Group Results', '3rd Place Results', 'Ro16', 'QF', 'SF', 'F']
 
-    writer = pd.ExcelWriter('euro_2021_poisson_forecast.xlsx', engine='xlsxwriter')
+    results_excel = "tournament_results.xlsx"
+    writer = pd.ExcelWriter(results_excel, engine='xlsxwriter')
 
     for df, sheet_name in zip(dfs, sheet_names):
-        df.to_excel(writer, sheet_name=sheet_name)
+        if df is not None:
+            df.to_excel(writer, sheet_name=sheet_name)
 
     writer.save()
 
@@ -356,8 +379,11 @@ if __name__ == '__main__':
     # Determine rankings of groups from the results (complex)
     df_group_results = get_group_rankings(df_group)
 
-    # Determine the top four 3rd place teams
-    df_3rd = get_third_place_rankings(df_group_results)
+    # Determine the top four 3rd place teams (only used for Euro)
+    if tournament.startswith('euro'):
+        df_3rd = get_third_place_rankings(df_group_results)
+    else:
+        df_3rd=None
 
     # Get the knockout round (ro16) match pairs
     df_ro16 = get_knockout_pairing(df_group_results, df_3rd)

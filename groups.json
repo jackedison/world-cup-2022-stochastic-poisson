@@ -1,0 +1,90 @@
+{
+    "euro_2021": {
+        "A": [
+            "Italy",
+            "Switzerland",
+            "Turkey",
+            "Wales"
+        ],
+        "B": [
+            "Belgium",
+            "Denmark",
+            "Finland",
+            "Russia"
+        ],
+        "C": [
+            "Austria",
+            "Netherlands",
+            "North Macedonia",
+            "Ukraine"
+        ],
+        "D": [
+            "Croatia",
+            "Czech Republic",
+            "England",
+            "Scotland"
+        ],
+        "E": [
+            "Poland",
+            "Slovakia",
+            "Spain",
+            "Sweden"
+        ],
+        "F": [
+            "France",
+            "Germany",
+            "Hungary",
+            "Portugal"
+        ]
+    },
+    "world_cup_2022": {
+        "A": [
+            "Qatar",
+            "Ecuador",
+            "Senegal",
+            "Netherlands"
+        ],
+        "B": [
+            "England",
+            "Iran",
+            "USA",
+            "Wales"
+        ],
+        "C": [
+            "Argentina",
+            "Saudi Arabia",
+            "Mexico",
+            "Poland"
+        ],
+        "D": [
+            "France",
+            "Australia",
+            "Denmark",
+            "Tunisia"
+        ],
+        "E": [
+            "Spain",
+            "Costa Rica",
+            "Germany",
+            "Japan"
+        ],
+        "F": [
+            "Belgium",
+            "Canada",
+            "Morocco",
+            "Croatia"
+        ],
+        "G": [
+            "Brazil",
+            "Serbia",
+            "Switzerland",
+            "Cameroon"
+        ],
+        "H": [
+            "Portugal",
+            "Ghana",
+            "Uruguay",
+            "South Korea"
+        ]
+    }
+}
